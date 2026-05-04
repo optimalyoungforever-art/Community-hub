@@ -74,7 +74,7 @@
 
     <div id="authBox" class="card">
         <div class="profile-setup">
-            <img id="pfp-preview" src="https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&q=40">
+            <img id="pfp-preview" src="https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&q=40" alt="Profile Preview">
             <div style="flex:1">
                 <input type="file" id="pfp-input" accept="image/*" onchange="processPfp(this)" style="display:none">
                 <button onclick="document.getElementById('pfp-input').click()" style="background:#334155; font-size:0.8rem; padding:8px">Upload Photo</button>
@@ -105,12 +105,12 @@
 
     <div id="postBox" class="card hidden">
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
-            <img id="user-nav-pfp" style="width:35px; height:35px; border-radius:50%; object-fit:cover;">
+            <img id="user-nav-pfp" style="width:35px; height:35px; border-radius:50%; object-fit:cover;" alt="User PFP">
             <b id="user-welcome"></b>
         </div>
         <textarea id="post-body" placeholder="Share something cool..." rows="2"></textarea>
         <div id="media-preview-container" class="preview-wrap hidden">
-            <img id="media-preview" style="width:100%; border-radius:12px; max-height:180px; object-fit:cover;">
+            <img id="media-preview" style="width:100%; border-radius:12px; max-height:180px; object-fit:cover;" alt="Media Preview">
             <button class="clear-btn" onclick="clearMedia()">×</button>
         </div>
         <div style="display:flex; gap:8px;">
@@ -156,12 +156,311 @@
         renderUserTabs(); updateUI(); renderFeed(); startHeartbeat();
     }
 
-    function runSimulation(type, targetEmail) {
-        if (!targetEmail) return;
+    function processPfp(input) {
+        if (input.files && input.files[0]) {
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                pendingPfp = e.target.result;
+                document.getElementById('pfp-preview').src = pendingPfp;
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    function processPostMedia(input) {
+        if (input.files && input.files[0]) {
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                pendingPostImg = e.target.result;
+                let container = document.getElementById('media-preview-container');
+                let preview = document.getElementById('media-preview');
+                preview.src = pendingPostImg;
+                container.classList.remove('hidden');
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    function clearMedia() {
+        pendingPostImg = null;
+        document.getElementById('media-preview-container').classList.add('hidden');
+        document.getElementById('post-img-input').value = "";
+    }
+
+    function register() {
+        let name = document.getElementById('new-name').value.trim();
+        let email = document.getElementById('email').value.trim();
+
+        if (!name || !email) {
+            alert('Please fill in all fields!');
+            return;
+        }
+
+        currentUser = { name, email, pfp: pendingPfp };
+        localStorage.setItem('rs_session', JSON.stringify(currentUser));
+
+        if (!accounts.some(acc => acc.email === email)) {
+            accounts.push(currentUser);
+        }
+
+        save();
+        updateUI();
+        renderFeed();
+        renderUserTabs();
+    }
+
+    function logout() {
+        currentUser = null;
+        localStorage.removeItem('rs_session');
+        updateUI();
+        renderUserTabs();
+    }
+
+    function createPost() {
+        let body = document.getElementById('post-body').value.trim();
+        if (!body && !pendingPostImg) return;
+
+        let newPost = {
+            id: Date.now(),
+            authorName: currentUser.name,
+            authorEmail: currentUser.email,
+            authorPfp: currentUser.pfp,
+            content: body,
+            media: pendingPostImg || null,
+            likes: [],
+            comments: [],
+            timestamp: 'Just now'
+        };
+
+        posts.unshift(newPost);
+        save();
+        renderFeed();
+
+        document.getElementById('post-body').value = '';
+        clearMedia();
+    }
+
+    function likePost(postId) {
+        if (!currentUser) return alert('Please sign in to interact.');
+        let post = posts.find(p => p.id === postId);
+        if (post) {
+            if (post.likes.includes(currentUser.email)) {
+                post.likes = post.likes.filter(e => e !== currentUser.email);
+            } else {
+                post.likes.push(currentUser.email);
+                addNotif(`${currentUser.name} liked your post.`);
+            }
+            save();
+            renderFeed();
+        }
+    }
+
+    function addComment(postId) {
+        if (!currentUser) return alert('Please sign in to comment.');
+        let inputVal = document.getElementById(`comment-input-${postId}`).value.trim();
+        if (inputVal === "") return;
+
+        let post = posts.find(p => p.id === postId);
+        if (post) {
+            post.comments.push({
+                author: currentUser.name,
+                text: inputVal
+            });
+            addNotif(`${currentUser.name} commented on your post.`);
+            save();
+            renderFeed();
+        }
+    }
+
+    function addNotif(text) {
+        if (!currentUser) return;
+        if (!notifications[currentUser.email]) notifications[currentUser.email] = [];
+        notifications[currentUser.email].unshift({ text, time: 'Just now' });
+        save();
+        renderNotifs();
+    }
+
+    function renderNotifs() {
+        if (!currentUser) return;
+        let notifList = document.getElementById('notif-list');
+        let userNotifs = notifications[currentUser.email] || [];
         
+        notifList.innerHTML = userNotifs.slice(0, 5).map(n => `
+            <div class="notif-item">
+                <div class="notif-dot"></div>
+                <div>${n.text}</div>
+            </div>
+        `).join('');
+
+        if (userNotifs.length > 0) document.getElementById('notif-dot').classList.remove('hidden');
+    }
+
+    function renderUserTabs() {
+        let nav = document.getElementById('multi-user-nav');
+        nav.innerHTML = accounts.map((u, index) => `
+            <div class="user-tab ${currentUser && currentUser.email === u.email ? 'active' : ''}" onclick="switchAccount(${index})">
+                <img src="${u.pfp}" alt="${u.name}">
+                <span>${u.name.split(' ')[0]}</span>
+            </div>
+        `).join('');
+    }
+
+    function switchAccount(index) {
+        currentUser = accounts[index];
+        localStorage.setItem('rs_session', JSON.stringify(currentUser));
+        updateUI();
+        renderFeed();
+        renderUserTabs();
+    }
+
+    function renderFeed() {
+        let container = document.getElementById('feed-container');
+        if (posts.length === 0) {
+            container.innerHTML = `<p style="text-align:center; color:var(--muted)">No posts yet. Share something cool above!</p>`;
+            return;
+        }
+
+        container.innerHTML = posts.map(p => `
+            <div class="post">
+                <div class="post-header">
+                    <img class="post-pfp" src="${p.authorPfp}" alt="${p.authorName}">
+                    <div class="post-info">
+                        <b>${p.authorName}</b>
+                        <span>${p.timestamp}</span>
+                    </div>
+                </div>
+                <div class="content">${p.content}</div>
+                ${p.media ? `<img class="post-media" src="${p.media}" alt="Post image">` : ''}
+                
+                <div class="actions">
+                    <div class="action-btn ${currentUser && p.likes.includes(currentUser.email) ? 'liked' : ''}" onclick="likePost(${p.id})">
+                        ❤️ <span>${p.likes.length}</span>
+                    </div>
+                    <div class="action-btn">💬 <span>${p.comments.length}</span></div>
+                </div>
+
+                <div class="comments">
+                    ${p.comments.length > 0 ? p.comments.map(c => `
+                        <div class="comment"><b>${c.author}</b>${c.text}</div>
+                    `).join('') : '<div class="comment" style="opacity:0.5">No comments yet. Be the first!</div>'}
+                    
+                    <div class="reply-box">
+                        <input id="comment-input-${p.id}" placeholder="Write a comment...">
+                        <button onclick="addComment(${p.id})">Send</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function updateUI() {
+        if (currentUser) {
+            document.getElementById('authBox').classList.add('hidden');
+            document.getElementById('notifBox').classList.remove('hidden');
+            document.getElementById('msgBox').classList.remove('hidden');
+            document.getElementById('postBox').classList.remove('hidden');
+
+            document.getElementById('user-welcome').textContent = `Welcome, ${currentUser.name}`;
+            document.getElementById('user-nav-pfp').src = currentUser.pfp;
+
+            renderNotifs();
+            renderChatUsers();
+        } else {
+            document.getElementById('authBox').classList.remove('hidden');
+            document.getElementById('notifBox').classList.add('hidden');
+            document.getElementById('msgBox').classList.add('hidden');
+            document.getElementById('postBox').classList.add('hidden');
+        }
+    }
+
+    function renderChatUsers() {
+        let container = document.getElementById('msg-user-list');
+        container.innerHTML = accounts.filter(u => !currentUser || u.email !== currentUser.email).map(u => `
+            <div class="msg-user ${activeChatPartner === u.email ? 'active' : ''}" onclick="openChat('${u.email}')">
+                <img src="${u.pfp}" alt="${u.name}">
+                <div style="font-size:0.65rem; margin-top:3px">${u.name.split(' ')[0]}</div>
+            </div>
+        `).join('');
+    }
+
+    function openChat(email) {
+        activeChatPartner = email;
+        renderChatUsers();
+        document.getElementById('chat-container').classList.remove('hidden');
+        renderMessages();
+    }
+
+    function renderMessages() {
+        if (!currentUser || !activeChatPartner) return;
+        let id = [currentUser.email, activeChatPartner].sort().join('_');
+        let msgs = conversations[id] || [];
+
+        let chatWindow = document.getElementById('chat-window');
+        chatWindow.innerHTML = msgs.map(m => `
+            <div class="msg-bubble ${m.sender === currentUser.email ? 'msg-sent' : 'msg-recv'}">
+                ${m.text}
+            </div>
+        `).join('');
+
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function sendDirectMsg() {
+        if (!activeChatPartner) return;
+        let input = document.getElementById('msg-input');
+        let text = input.value.trim();
+        if (text === '') return;
+
+        let id = [currentUser.email, activeChatPartner].sort().join('_');
+        if (!conversations[id]) conversations[id] = [];
+
+        conversations[id].push({ sender: currentUser.email, text });
+        save();
+        renderMessages();
+        input.value = '';
+        runSimulation('onMsg', activeChatPartner);
+    }
+
+    function runSimulation(type, targetEmail) {
         setTimeout(() => {
-            if (type === 'onMsg') {
-                const id = [currentUser.email, targetEmail].sort().join('_');
-                if (!conversations[id]) conversations[id] = [];
-                const replies = ["Nice to meet you!", "How's your project going?", "I'm just browsing the feed.", "That sounds great!", "I'll reply soon."];
-                conversations[id].push({ sender: targetEmail, text: replies[Math.floor(Math.random() * replies.length)] })
+            let id = [currentUser.email, targetEmail].sort().join('_');
+            if (!conversations[id]) conversations[id] = [];
+            
+            const replies = ["Nice to meet you!", "How is your application going?", "I am just reviewing the feed.", "That sounds excellent!", "I will check that out soon!"];
+            conversations[id].push({
+                sender: targetEmail,
+                text: replies[Math.floor(Math.random() * replies.length)]
+            });
+            save();
+            renderMessages();
+            renderNotifs();
+        }, 1500);
+    }
+
+    function startHeartbeat() {
+        setInterval(() => {
+            if (posts.length > 0 && Math.random() > 0.5) {
+                let r = Math.floor(Math.random() * posts.length);
+                let p = posts[r];
+                let names = ["Elena", "David", "Sarah", "Marcus", "Emily"];
+                addNotif(`${names[Math.floor(Math.random() * names.length)]} liked your post.`);
+            }
+        }, 30000);
+    }
+
+    function save() {
+        localStorage.setItem('rs_accounts', JSON.stringify(accounts));
+        localStorage.setItem('rs_posts', JSON.stringify(posts));
+        localStorage.setItem('rs_msgs', JSON.stringify(conversations));
+        localStorage.setItem('rs_notifs', JSON.stringify(notifications));
+        if (currentUser) {
+            localStorage.setItem('rs_session', JSON.stringify(currentUser));
+        }
+    }
+
+    window.onload = init;
+</script>
+
+</body>
+</html>
+
